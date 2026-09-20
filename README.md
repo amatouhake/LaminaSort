@@ -12,7 +12,7 @@ touches server-authoritative state directly.
 
 ## Target
 
-* LeviLamina **v26.51.1** (client)
+* LeviLamina **v26.51.3** (client)
 * Minecraft Bedrock Edition **1.26.51.x** (Windows x64)
 
 Requires only the Minecraft client with LeviLamina: no server mod, operator

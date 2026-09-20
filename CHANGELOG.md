@@ -31,3 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration file (`sortKeyCode`, `sortContainers`) and a `--trace=y`
   diagnostic build.
 - Unit tests for the pure sort planner (`LaminaSortTests`).
+
+### Changed
+
+- Target LeviLamina Client 26.51.3 (built against its SDK; `--trace=y` uses
+  the `RotatePolicy`-based `ll::io::FileSink` introduced in 26.51.2).
