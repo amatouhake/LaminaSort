@@ -48,3 +48,15 @@ target("LaminaSort")
     add_files("src/**.cpp")
     add_includedirs("src")
 
+-- Unit tests for the pure (game-independent) sort planner. Not built by
+-- default: `xmake build LaminaSortTests && xmake run LaminaSortTests`.
+target("LaminaSortTests")
+    set_kind("binary")
+    set_default(false)
+    set_languages("c++20")
+    add_includedirs("src")
+    add_files("src/mod/sort/**.cpp", "tests/**.cpp")
+    if is_plat("windows") then
+        add_cxflags("/utf-8", "/W4")
+        set_toolchains("clang-cl")
+    end
