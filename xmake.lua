@@ -10,7 +10,18 @@ option("target_type")
     set_values("client")
 option_end()
 
-add_requires("levilamina 26.51.1", {configs = {target_type = get_config("target_type")}})
+-- Diagnostic build: raises the mod's logger to Debug and mirrors it, flushed
+-- immediately, into mods/LaminaSort/trace.log. Off by default.
+option("trace")
+    set_default(false)
+    set_showmenu(true)
+    set_description("Enable verbose runtime diagnostics")
+option_end()
+
+-- The "v" form checks out the upstream git tag directly; the LeviMC xmake-repo
+-- had not published a 26.51.3 version entry when this was written. Switch to
+-- "levilamina 26.51.3" once it has one.
+add_requires("levilamina v26.51.3", {configs = {target_type = get_config("target_type")}})
 
 add_requires("levibuildscript")
 
@@ -41,6 +52,9 @@ target("LaminaSort")
         set_toolchains("clang-cl")
     end
     add_packages("levilamina")
+    if has_config("trace") then
+        add_defines("LAMINASORT_TRACE")
+    end
     set_kind("shared")
     set_languages("c++20")
     set_symbols("debug")
@@ -48,3 +62,15 @@ target("LaminaSort")
     add_files("src/**.cpp")
     add_includedirs("src")
 
+-- Unit tests for the pure (game-independent) sort planner. Not built by
+-- default: `xmake build LaminaSortTests && xmake run LaminaSortTests`.
+target("LaminaSortTests")
+    set_kind("binary")
+    set_default(false)
+    set_languages("c++20")
+    add_includedirs("src")
+    add_files("src/mod/sort/**.cpp", "tests/**.cpp")
+    if is_plat("windows") then
+        add_cxflags("/utf-8", "/W4")
+        set_toolchains("clang-cl")
+    end
