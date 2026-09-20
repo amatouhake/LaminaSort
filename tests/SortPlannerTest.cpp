@@ -15,6 +15,9 @@
 
 using namespace lamina_sort::sort;
 
+// Semantic ordering checks live in SortKeyTest.cpp.
+int runSortKeyTests();
+
 namespace {
 
 int gFailures = 0;
@@ -400,8 +403,8 @@ int main() {
 
     if (gFailures == 0) {
         std::printf("SortPlannerTest: all checks passed\n");
-        return 0;
+    } else {
+        std::printf("SortPlannerTest: %d check(s) failed\n", gFailures);
     }
-    std::printf("SortPlannerTest: %d check(s) failed\n", gFailures);
-    return 1;
+    return (gFailures + runSortKeyTests()) == 0 ? 0 : 1;
 }

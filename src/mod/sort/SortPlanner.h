@@ -1,6 +1,7 @@
 #pragma once
 
-#include <climits>
+#include "mod/sort/SortKey.h"
+
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -13,32 +14,6 @@
 // game's decision (ItemStackBase::isStackable) and arrives here as an opaque
 // `group` id. Equal non-negative group ids mean "vanilla lets these stack".
 namespace lamina_sort::sort {
-
-/// Ordering key for one kind of item. Compared lexicographically.
-struct SortKey {
-    /// Position in the Creative inventory, INT_MAX when unknown (unknown items
-    /// sort after every known one, then by the remaining fields).
-    int creativeIndex{INT_MAX};
-    /// Namespaced item identifier, e.g. "minecraft:cobblestone".
-    std::string typeName;
-    int         aux{0};
-    int         damage{0};
-    /// Stable text describing other state that makes stacks distinct
-    /// (custom name, user data hash, ...). Empty for plain items.
-    std::string detail;
-
-    friend bool operator<(SortKey const& a, SortKey const& b) {
-        if (a.creativeIndex != b.creativeIndex) return a.creativeIndex < b.creativeIndex;
-        if (a.typeName != b.typeName) return a.typeName < b.typeName;
-        if (a.aux != b.aux) return a.aux < b.aux;
-        if (a.damage != b.damage) return a.damage < b.damage;
-        return a.detail < b.detail;
-    }
-    friend bool operator==(SortKey const& a, SortKey const& b) {
-        return a.creativeIndex == b.creativeIndex && a.typeName == b.typeName && a.aux == b.aux && a.damage == b.damage
-            && a.detail == b.detail;
-    }
-};
 
 /// One slot of the sortable region.
 struct SlotStack {

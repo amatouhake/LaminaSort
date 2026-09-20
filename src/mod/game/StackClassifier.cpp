@@ -1,7 +1,10 @@
 #include "mod/game/StackClassifier.h"
 
 #include "mc/deps/nbt/CompoundTag.h"
+#include "mc/deps/nbt/ListTag.h"
+#include "mc/deps/nbt/Tag.h"
 #include "mc/deps/shared_types/item/CreativeItemCategory.h"
+#include "mc/world/item/Item.h"
 #include "mc/world/item/ItemInstance.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/item/registry/CreativeGroupInfo.h"
@@ -10,41 +13,74 @@
 
 #include <climits>
 #include <string>
+#include <string_view>
 
 namespace lamina_sort::game {
 
 namespace {
 
-// The Creative screen shows its categories as tabs in this fixed order, which
-// differs from the enum order. Anything else (command-only, undefined) goes
-// after the visible tabs.
-int tabRank(SharedTypes::CreativeItemCategory category) {
+// NBT keys as the game writes them.
+constexpr std::string_view kEnchantsKey     = "ench"; // ItemStackBase::TAG_ENCHANTS
+constexpr std::string_view kEnchantIdKey    = "id";
+constexpr std::string_view kEnchantLevelKey = "lvl";
+constexpr std::string_view kItemsKey        = "Items"; // container item contents
+// minecraft:<colour>_shulker_box, minecraft:undyed_shulker_box
+constexpr std::string_view kShulkerBoxSuffix = "shulker_box";
+
+// Maps the game's Creative categories onto LaminaSort's sections. Only these
+// four are visible tabs; anything else is treated as unknown.
+sort::Section sectionOf(SharedTypes::CreativeItemCategory category) {
     switch (category) {
-    case SharedTypes::CreativeItemCategory::Construction:
-        return 0;
     case SharedTypes::CreativeItemCategory::Equipment:
-        return 1;
+        return sort::Section::Equipment;
     case SharedTypes::CreativeItemCategory::Items:
-        return 2;
+        return sort::Section::Items;
+    case SharedTypes::CreativeItemCategory::Construction:
+        return sort::Section::Construction;
     case SharedTypes::CreativeItemCategory::Nature:
-        return 3;
+        return sort::Section::Nature;
     default:
-        return 4;
+        return sort::Section::Unknown;
     }
 }
 
-// Composes one comparable number out of (tab, group, entry) so that the
-// Creative screen's visual order (tab by tab, group by group, item by item)
-// is preserved. The limits are far above the registry's real sizes.
-int creativeOrdinal(CreativeItemRegistry const& registry, CreativeItemEntry const& entry) {
-    constexpr int kGroupSpan = 10000;   // entries per group
-    constexpr int kTabSpan   = 1000000; // entries per tab
-    auto const&   groups     = registry.mCreativeGroups.get();
-    int           rank       = 4;
-    if (entry.mGroupIndex < groups.size()) {
-        rank = tabRank(groups[entry.mGroupIndex].mCategory);
+bool isShulkerBox(ItemStackBase const& stack) { return stack.getTypeName().ends_with(kShulkerBoxSuffix); }
+
+// The game's own food flag (Item::isFood). Bedrock's Creative screen files
+// most food under Equipment (and some under Nature); a chest reads better
+// with food among the items, so this is the one category override.
+bool isFood(ItemStackBase const& stack) {
+    auto const item = stack.mItem;
+    return item && item->isFood();
+}
+
+int readInt(CompoundTag const& tag, std::string_view key, int fallback) {
+    auto it = tag.mTags.find(key);
+    if (it == tag.mTags.end() || !it->second.is_number_integer()) return fallback;
+    return static_cast<int>(it->second);
+}
+
+ListTag const* findList(CompoundTag const* tag, std::string_view key) {
+    if (!tag) return nullptr;
+    auto it = tag->mTags.find(key);
+    if (it == tag->mTags.end() || !it->second.is_array()) return nullptr;
+    return &it->second.get<ListTag>();
+}
+
+// Enchantments as stored on the item ("ench" list of {id, lvl}); enchanted
+// books use the same list for their stored enchantment.
+std::vector<sort::Enchantment> readEnchantments(ItemStackBase const& stack) {
+    std::vector<sort::Enchantment> list;
+    auto const*                    ench = findList(stack.mUserData.get(), kEnchantsKey);
+    if (!ench) return list;
+    for (auto const& entryPtr : *ench) {
+        if (!entryPtr || entryPtr->getId() != Tag::Type::Compound) continue;
+        auto const& entry = entryPtr->as<CompoundTag>();
+        int const   id    = readInt(entry, kEnchantIdKey, -1);
+        if (id < 0) continue;
+        list.push_back(sort::Enchantment{id, readInt(entry, kEnchantLevelKey, 1)});
     }
-    return rank * kTabSpan + static_cast<int>(entry.mGroupIndex) * kGroupSpan + static_cast<int>(entry.mIndex);
+    return sort::canonicalEnchantments(std::move(list));
 }
 
 } // namespace
@@ -94,20 +130,34 @@ sort::SortKey StackClassifier::keyOf(int group) {
     if (auto it = mKeyCache.find(group); it != mKeyCache.end()) return it->second;
     auto const&   stack = mRepresentatives[static_cast<size_t>(group)];
     sort::SortKey key;
-    key.creativeIndex = creativeIndexOf(stack);
-    key.typeName      = stack.getTypeName();
-    key.aux           = stack.getAuxValue();
-    key.damage        = stack.getDamageValue();
-    // Stacks that vanilla keeps apart because of their user data still need a
-    // deterministic relative order; the custom name reads well in logs and
-    // the NBT hash separates everything else (enchantments, lore, contents).
-    if (stack.mUserData && !stack.mUserData->mTags.empty()) {
-        key.detail  = stack.getCustomName();
-        key.detail += '|';
-        key.detail += std::to_string(stack.mUserData->hash());
+
+    auto const placement = placementOf(stack);
+    key.section          = placement.section;
+    key.creativeIndex    = placement.creativeIndex;
+    key.typeName         = stack.getTypeName();
+    key.aux              = stack.getAuxValue();
+
+    // A custom name is explicit player intent: named variants lead and are
+    // ordered by their visible name.
+    key.name     = sort::normalizeName(stack.getCustomName());
+    key.nameRank = key.name.empty() ? 1 : 0;
+
+    // Enchanted variants lead the plain ones and group by enchantment
+    // identity (id order), then level; damage (worse condition) comes last.
+    key.enchantments = readEnchantments(stack);
+    key.variantRank  = key.enchantments.empty() ? 1 : 0;
+    key.damage       = stack.getDamageValue();
+
+    if (isShulkerBox(stack)) {
+        describeShulkerBox(stack, key);
     }
-    // Adventure-mode restrictions live outside the NBT compound but still
-    // keep stacks apart in vanilla.
+
+    // Everything else that keeps stacks apart (lore, other components, the
+    // adventure-mode restrictions that live outside the NBT compound) still
+    // needs a deterministic order; these hashes are the last resort only.
+    if (stack.mUserData && !stack.mUserData->mTags.empty()) {
+        key.detail = std::to_string(stack.mUserData->hash());
+    }
     if (stack.mCanPlaceOnHash != 0 || stack.mCanDestroyHash != 0) {
         key.detail += "|p" + std::to_string(stack.mCanPlaceOnHash) + "|d" + std::to_string(stack.mCanDestroyHash);
     }
@@ -115,33 +165,86 @@ sort::SortKey StackClassifier::keyOf(int group) {
     return key;
 }
 
-int StackClassifier::creativeIndexOf(ItemStack const& stack) {
-    if (!mCreativeRegistry) return INT_MAX;
+// Shulker Boxes form the leading section: filled boxes before empty ones,
+// then custom name, then a signature of the contents (independent of the
+// internal slot layout), then colour. The contents are read-only input.
+void StackClassifier::describeShulkerBox(ItemStack const& stack, sort::SortKey& key) {
+    key.section     = sort::Section::ShulkerBox;
+    key.tail        = key.typeName; // colour / variant decides late
+    key.typeName    = std::string(kShulkerBoxSuffix);
+    key.aux         = 0;
+    key.variantRank = 0;
+    key.enchantments.clear();
+    key.damage = 0;
+
+    std::vector<sort::ContentEntry> entries;
+    if (auto const* items = findList(stack.mUserData.get(), kItemsKey)) {
+        for (auto const& entryPtr : *items) {
+            if (!entryPtr || entryPtr->getId() != Tag::Type::Compound) continue;
+            // fromTag resolves the item through the client's registry; a
+            // malformed entry must not take the whole signature down.
+            try {
+                ItemStack inner = ItemStack::fromTag(entryPtr->as<CompoundTag>());
+                if (inner.isNull() || inner.mCount <= 0) continue;
+                auto const p = placementOf(inner);
+                entries.push_back(sort::ContentEntry{
+                    p.section,
+                    p.creativeIndex,
+                    inner.getTypeName(),
+                    static_cast<int>(inner.getAuxValue()),
+                    static_cast<int>(inner.mCount)
+                });
+            } catch (...) {
+                entries.push_back(sort::ContentEntry{sort::Section::Unknown, INT_MAX, "?", 0, 1});
+            }
+        }
+    }
+    key.contents      = sort::contentSignature(std::move(entries));
+    key.creativeIndex = key.contents.empty() ? 1 : 0; // filled boxes first
+}
+
+StackClassifier::Placement StackClassifier::placementOf(ItemStackBase const& stack) {
+    if (!mCreativeRegistry) return {};
 
     auto const id       = static_cast<int>(stack.getId());
     auto const aux      = static_cast<int>(stack.getAuxValue());
     auto const cacheKey = std::make_pair(id, aux);
-    if (auto it = mCreativeIndexCache.find(cacheKey); it != mCreativeIndexCache.end()) {
+    if (auto it = mPlacementCache.find(cacheKey); it != mPlacementCache.end()) {
         return it->second;
     }
 
-    // Prefer the entry with the same item and aux value (potion variants and
-    // the like), otherwise the first entry of the item; stacks that differ
-    // only in user data then share a primary key and are ordered by `detail`.
-    int idOnly = INT_MAX;
-    int found  = INT_MAX;
+    // The ordinal preserves the Creative screen's visual order inside a
+    // section: group by group, then entry by entry. Prefer the entry with the
+    // same aux value (potion variants and the like), otherwise the item's
+    // first entry; stacks that differ only in user data then share a
+    // placement and are ordered by their own state.
+    constexpr int kGroupSpan = 10000; // entries per group, far above reality
+    auto const&   groups     = mCreativeRegistry->mCreativeGroups.get();
+    Placement     found;
+    Placement     idOnly;
+    bool          haveIdOnly = false;
     for (auto const& entry : mCreativeRegistry->mCreativeItems.get()) {
         auto const& item = entry.mItemInstance.get();
         if (item.getId() != id) continue;
-        auto const ordinal = creativeOrdinal(*mCreativeRegistry, entry);
+        Placement p;
+        if (entry.mGroupIndex < groups.size()) {
+            p.section = sectionOf(groups[entry.mGroupIndex].mCategory);
+        }
+        p.creativeIndex = static_cast<int>(entry.mGroupIndex) * kGroupSpan + static_cast<int>(entry.mIndex);
         if (item.getAuxValue() == aux) {
-            found = ordinal;
+            found = p;
             break;
         }
-        if (idOnly == INT_MAX) idOnly = ordinal;
+        if (!haveIdOnly) {
+            idOnly     = p;
+            haveIdOnly = true;
+        }
     }
-    if (found == INT_MAX) found = idOnly;
-    mCreativeIndexCache.emplace(cacheKey, found);
+    if (found.creativeIndex == INT_MAX && haveIdOnly) found = idOnly;
+    if (found.section != sort::Section::Unknown && isFood(stack)) {
+        found.section = sort::Section::Items;
+    }
+    mPlacementCache.emplace(cacheKey, found);
     return found;
 }
 

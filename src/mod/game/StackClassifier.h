@@ -4,11 +4,13 @@
 
 #include "mc/world/item/ItemStack.h"
 
+#include <climits>
 #include <map>
 #include <utility>
 #include <vector>
 
 class CreativeItemRegistry;
+class ItemStackBase;
 
 namespace lamina_sort::game {
 
@@ -16,8 +18,12 @@ namespace lamina_sort::game {
 ///
 /// Mergeability is never decided here: two stacks share a planner group only
 /// if vanilla's own `ItemStackBase::isStackable(other)` says the player could
-/// stack them through the inventory UI. Ordering uses the client's Creative
-/// inventory registry when available and stable item identity otherwise.
+/// stack them through the inventory UI.
+///
+/// Ordering: a small semantic layer (Shulker Boxes first, then Equipment,
+/// Items, Construction, Nature, unknown) on top of the client's Creative
+/// registry order, with the item's own state (custom name, enchantments,
+/// damage, container contents) deciding the order of variants of one item.
 class StackClassifier {
 public:
     /// `creativeRegistry` may be null; keys then fall back to identifier order.
@@ -35,15 +41,22 @@ public:
     [[nodiscard]] bool usedCreativeOrder() const { return mUsedCreativeOrder; }
 
 private:
+    /// Creative placement of an item: section and ordinal inside it.
+    struct Placement {
+        sort::Section section{sort::Section::Unknown};
+        int           creativeIndex{INT_MAX};
+    };
+
     int           groupOf(ItemStack const& stack);
     sort::SortKey keyOf(int group);
-    int           creativeIndexOf(ItemStack const& stack);
+    Placement     placementOf(ItemStackBase const& stack);
+    void          describeShulkerBox(ItemStack const& stack, sort::SortKey& key);
 
-    CreativeItemRegistry const*        mCreativeRegistry;
-    std::vector<ItemStack>             mRepresentatives;
-    std::map<int, sort::SortKey>       mKeyCache;           ///< group -> key
-    std::map<std::pair<int, int>, int> mCreativeIndexCache; ///< (id, aux) -> index
-    bool                               mUsedCreativeOrder{false};
+    CreativeItemRegistry const*              mCreativeRegistry;
+    std::vector<ItemStack>                   mRepresentatives;
+    std::map<int, sort::SortKey>             mKeyCache;       ///< group -> key
+    std::map<std::pair<int, int>, Placement> mPlacementCache; ///< (id, aux) -> placement
+    bool                                     mUsedCreativeOrder{false};
 };
 
 } // namespace lamina_sort::game

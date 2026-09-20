@@ -47,6 +47,20 @@ std::string describeStack(ItemStack const& stack) {
     return stack.getTypeName() + " x" + std::to_string(stack.mCount);
 }
 
+// "[S] minecraft:red_shulker_box x1" style label for a planned stack.
+std::string describeStack(sort::SlotStack const& s) {
+    if (s.empty()) return "-";
+    std::string out(1, '[');
+    out += sort::sectionLabel(s.key.section);
+    out += "] ";
+    out += s.key.tail.empty() ? s.key.typeName : s.key.tail;
+    if (!s.key.name.empty()) out += " \"" + s.key.name + "\"";
+    if (!s.key.enchantments.empty()) out += " ench" + std::to_string(s.key.enchantments.size());
+    if (s.key.damage > 0) out += " dmg" + std::to_string(s.key.damage);
+    out += " x" + std::to_string(s.count);
+    return out;
+}
+
 // Runtime view of a slot, compared against the planner's simulated state.
 struct SlotVerifier {
     ContainerManagerController const& manager;
@@ -68,8 +82,8 @@ struct SlotVerifier {
     }
 
     [[nodiscard]] std::string mismatch(int index, sort::SlotStack const& expected) const {
-        std::string want = expected.empty() ? "-" : expected.key.typeName + " x" + std::to_string(expected.count);
-        return "#" + std::to_string(index) + " expected " + want + ", found " + describeStack(actual(index));
+        return "#" + std::to_string(index) + " expected " + describeStack(expected) + ", found "
+             + describeStack(actual(index));
     }
 };
 
@@ -162,8 +176,7 @@ bool SortSession::run(
         for (auto const& s : plan.expected) {
             if (s.empty()) continue;
             if (!layout.empty()) layout += ", ";
-            layout +=
-                s.key.typeName + " x" + std::to_string(s.count) + " (#" + std::to_string(s.key.creativeIndex) + ")";
+            layout += describeStack(s);
         }
         logger.debug("Planned layout: [{}]", layout);
     }

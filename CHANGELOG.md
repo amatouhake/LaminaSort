@@ -18,8 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidation of partial stacks that vanilla allows to stack
   (`42 + 10 -> 52`, `42 + 30 -> 64 + 8`), decided by the game's own
   `ItemStackBase::isStackable` check.
-- Creative inventory ordering taken from the client's creative item registry,
-  with identifier order as fallback.
+- Zero-config default order: Shulker Boxes (filled before empty, named
+  first, then by contents, then colour), then gear, items, building blocks,
+  natural blocks, unknown items, empty slots. Inside a section the client's
+  Creative registry order is kept; food always counts as an item.
+- Variants of one item are ordered by custom name, then enchantments
+  (registry order, higher level first), then damage (better condition first);
+  the NBT hash is only a last-resort tie-breaker.
 - Execution through the vanilla container transfer path
   (`ContainerManagerController::handlePlaceAmount` / `handleSwap`), verified
   step by step against the planned state; any disagreement aborts the sort.
