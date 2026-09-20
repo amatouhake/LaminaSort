@@ -3,6 +3,7 @@
 #include "mod/game/ResponseLogger.h"
 #include "mod/game/ScreenTracker.h"
 #include "mod/game/SortSession.h"
+#include "mod/game/TextInputTracker.h"
 
 #include "ll/api/Config.h"
 #include "ll/api/input/KeyHandle.h"
@@ -75,6 +76,7 @@ bool LaminaSort::load() {
 bool LaminaSort::enable() {
     getSelf().getLogger().debug("Enabling...");
     game::ScreenTracker::getInstance().install();
+    game::TextInputTracker::getInstance().install();
     game::ResponseLogger::install();
     return true;
 }
@@ -82,6 +84,7 @@ bool LaminaSort::enable() {
 bool LaminaSort::disable() {
     getSelf().getLogger().debug("Disabling...");
     game::ResponseLogger::uninstall();
+    game::TextInputTracker::getInstance().uninstall();
     game::ScreenTracker::getInstance().uninstall();
     return true;
 }
@@ -89,9 +92,16 @@ bool LaminaSort::disable() {
 void LaminaSort::onSortRequested(IClientInstance& client) {
     auto& logger = getSelf().getLogger();
 
-    auto controller = game::ScreenTracker::getInstance().current();
+    auto& tracker    = game::ScreenTracker::getInstance();
+    auto  controller = tracker.current();
     if (!controller) {
         logger.debug("Sort key pressed with no container screen open; ignored");
+        return;
+    }
+    // The key is also an ordinary letter: while a text box (Creative search,
+    // anvil name, ...) is being edited it belongs to the text, not to us.
+    if (game::TextInputTracker::getInstance().isEditing(tracker.currentView())) {
+        logger.debug("Sort key pressed while a text box is being edited; ignored");
         return;
     }
     auto const region = game::SortSession::selectRegion(*controller, mConfig);

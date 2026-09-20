@@ -6,6 +6,7 @@
 
 class ContainerScreenController;
 class ScreenController;
+class ScreenView;
 
 namespace ll::event::inline render {
 class AfterUIRenderEvent;
@@ -33,6 +34,10 @@ public:
     /// screen is open (or it has already been destroyed).
     [[nodiscard]] std::shared_ptr<ContainerScreenController> current() const;
 
+    /// The ScreenView that owns `current()`; only meaningful while
+    /// `current()` is non-null (the view outlives its controller's onLeave).
+    [[nodiscard]] ScreenView const* currentView() const { return mCurrentView; }
+
     /// Called from the onLeave hook.
     void onControllerLeft(ContainerScreenController& controller);
 
@@ -40,6 +45,7 @@ private:
     void onAfterUIRender(ll::event::AfterUIRenderEvent& event);
 
     std::weak_ptr<ScreenController> mCurrent;
+    ScreenView const*               mCurrentView{nullptr};
     ll::event::ListenerPtr          mRenderListener;
     bool                            mInstalled{false};
 };

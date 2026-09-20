@@ -1,5 +1,7 @@
 #include "mod/game/ScreenTracker.h"
 
+#include "mod/game/TextInputTracker.h"
+
 #include "ll/api/event/EventBus.h"
 #include "ll/api/event/render/UIRenderEvent.h"
 #include "ll/api/memory/Hook.h"
@@ -52,7 +54,8 @@ void ScreenTracker::uninstall() {
     }
     Hooks::unhook();
     mCurrent.reset();
-    mInstalled = false;
+    mCurrentView = nullptr;
+    mInstalled   = false;
 }
 
 std::shared_ptr<ContainerScreenController> ScreenTracker::current() const {
@@ -66,6 +69,8 @@ void ScreenTracker::onControllerLeft(ContainerScreenController& controller) {
     auto current = mCurrent.lock();
     if (current && current.get() == static_cast<ScreenController*>(&controller)) {
         mCurrent.reset();
+        TextInputTracker::getInstance().forget(mCurrentView);
+        mCurrentView = nullptr;
     }
 }
 
@@ -77,7 +82,11 @@ void ScreenTracker::onAfterUIRender(ll::event::AfterUIRenderEvent& event) {
         return;
     }
     if (mCurrent.lock() != controller) {
-        mCurrent = controller;
+        mCurrent     = controller;
+        mCurrentView = &event.screenView();
+        // A freshly shown screen starts with no text box selected; drop any
+        // stale knowledge a previous screen at the same address left behind.
+        TextInputTracker::getInstance().forget(mCurrentView);
     }
 }
 
