@@ -78,22 +78,26 @@ inline bool operator==(SortKey const& a, SortKey const& b) { return compareKeys(
 /// order, which is also how it lists them.
 [[nodiscard]] std::vector<Enchantment> canonicalEnchantments(std::vector<Enchantment> list);
 
-/// One kind of item found inside a container item, for content signatures.
+/// One stack found inside a container item, for content signatures.
 struct ContentEntry {
-    Section     section{Section::Unknown};
-    int         creativeIndex{INT_MAX};
-    std::string typeName;
-    int         aux{0};
-    int         count{0};
+    /// The inner item's full ordering key (built like any inventory item's,
+    /// minus nested contents), so custom names, enchantments, damage and the
+    /// other variant state keep inner items apart.
+    SortKey key;
+    int     count{0};
 };
 
 /// Builds a deterministic signature of a container's contents that does not
-/// depend on which internal slots the items occupy: entries of the same kind
+/// depend on which internal slots the items occupy: entries with equal keys
 /// are merged (counts summed), the kinds are sorted the same way the
 /// inventory itself would be, and the result is serialised so that plain
 /// string comparison orders signatures sensibly (first kind, then its total,
 /// then the next kind, ...). Empty when there are no items.
 [[nodiscard]] std::string contentSignature(std::vector<ContentEntry> entries);
+
+/// Canonical text form of a key: every field, fixed-width numbers, in
+/// comparison order. Used by contentSignature; equal keys give equal text.
+[[nodiscard]] std::string keySignature(SortKey const& key);
 
 /// Short label for logs, e.g. "S", "E", "I", "C", "N", "?".
 [[nodiscard]] char sectionLabel(Section section);

@@ -4,7 +4,6 @@
 #include <cctype>
 #include <cstdio>
 #include <map>
-#include <tuple>
 
 namespace lamina_sort::sort {
 
@@ -79,24 +78,49 @@ std::vector<Enchantment> canonicalEnchantments(std::vector<Enchantment> list) {
     return list;
 }
 
+std::string keySignature(SortKey const& key) {
+    std::string out;
+    out += padded(static_cast<int>(key.section), 1);
+    out += padded(key.creativeIndex == INT_MAX ? 999999999 : key.creativeIndex, 9);
+    out += key.typeName;
+    out += ':';
+    out += padded(key.aux, 5);
+    out += ':';
+    out += padded(key.nameRank, 1);
+    out += key.name;
+    out += ':';
+    out += padded(key.variantRank, 1);
+    for (auto const& e : key.enchantments) {
+        out += padded(e.id, 3);
+        out += '-';
+        out += padded(99 - std::min(e.level, 99), 2); // higher level first
+        out += ',';
+    }
+    out += ':';
+    out += key.contents;
+    out += ':';
+    out += padded(key.damage, 6);
+    out += ':';
+    out += key.tail;
+    out += ':';
+    out += key.detail;
+    return out;
+}
+
 std::string contentSignature(std::vector<ContentEntry> entries) {
-    // Merge kinds regardless of slot layout, then order them like an
+    // Merge equal kinds regardless of slot layout, then order them like an
     // inventory would be ordered.
-    using Kind = std::tuple<int, int, std::string, int>;
-    std::map<Kind, int> totals;
+    struct KeyLess {
+        bool operator()(SortKey const& a, SortKey const& b) const { return compareKeys(a, b) < 0; }
+    };
+    std::map<SortKey, int, KeyLess> totals;
     for (auto const& e : entries) {
-        if (e.count <= 0 || e.typeName.empty()) continue;
-        totals[Kind{static_cast<int>(e.section), e.creativeIndex, e.typeName, e.aux}] += e.count;
+        if (e.count <= 0 || e.key.typeName.empty()) continue;
+        totals[e.key] += e.count;
     }
     std::string out;
-    for (auto const& [kind, total] : totals) {
-        auto const& [section, index, typeName, aux] = kind;
-
-        out += padded(section, 1);
-        out += padded(index == INT_MAX ? 999999999 : index, 9);
-        out += typeName;
-        out += ':';
-        out += padded(aux, 5);
+    for (auto const& [key, total] : totals) {
+        out += keySignature(key);
         out += 'x';
         out += padded(99999 - std::min(total, 99999), 5); // bigger totals first
         out += ';';

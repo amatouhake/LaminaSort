@@ -75,10 +75,14 @@ SortKey shulker(std::string const& colourId, std::vector<ContentEntry> contents,
 }
 
 ContentEntry cobble(int count) {
-    return ContentEntry{Section::Construction, 130383, "minecraft:cobblestone", 0, count};
+    return ContentEntry{item(Section::Construction, 130383, "minecraft:cobblestone"), count};
 }
-ContentEntry stone(int count) { return ContentEntry{Section::Nature, 270603, "minecraft:stone", 0, count}; }
-ContentEntry egg(int count) { return ContentEntry{Section::Nature, 440861, "minecraft:egg", 0, count}; }
+ContentEntry stone(int count) { return ContentEntry{item(Section::Nature, 270603, "minecraft:stone"), count}; }
+ContentEntry egg(int count) { return ContentEntry{item(Section::Nature, 440861, "minecraft:egg"), count}; }
+// An inner tool with the same variant state an inventory item would carry.
+ContentEntry innerPickaxe(int damage = 0, std::vector<Enchantment> ench = {}, std::string const& name = "") {
+    return ContentEntry{pickaxe(damage, std::move(ench), name), 1};
+}
 
 bool before(SortKey const& a, SortKey const& b) { return compareKeys(a, b) < 0; }
 bool same(SortKey const& a, SortKey const& b) { return compareKeys(a, b) == 0; }
@@ -251,6 +255,76 @@ void testDifferentContentsOrderDeterministically() {
     // Deterministic regardless of the order the comparison is made in.
     CHECK(!before(stoneBox, cobbleBox));
     CHECK(compareKeys(cobbleBox, stoneBox) == -compareKeys(stoneBox, cobbleBox));
+}
+
+void testShulkerInnerEnchantedVsPlainDiffer() {
+    // Same base item inside, different variant state: the boxes must not
+    // collapse to the same content key.
+    auto const effBox = shulker(
+        "minecraft:red_shulker_box",
+        {
+            innerPickaxe(0, {{kEfficiency, 5}}
+             )
+    }
+    );
+    auto const plainBox = shulker("minecraft:red_shulker_box", {innerPickaxe(0)});
+    CHECK(!same(effBox, plainBox));
+    CHECK(effBox.contents != plainBox.contents);
+    // And they follow the inventory rule: the enchanted one leads.
+    CHECK(before(effBox, plainBox));
+}
+
+void testShulkerInnerNamedVariants() {
+    auto const namedBox = shulker("minecraft:red_shulker_box", {innerPickaxe(0, {}, "Old Faithful")});
+    auto const plainBox = shulker("minecraft:red_shulker_box", {innerPickaxe(0)});
+    CHECK(!same(namedBox, plainBox));
+    CHECK(before(namedBox, plainBox)); // named inner item leads, as in an inventory
+    // Formatting codes in the inner name do not matter.
+    CHECK(same(namedBox, shulker("minecraft:red_shulker_box", {innerPickaxe(0, {}, "§bOld Faithful")})));
+}
+
+void testShulkerInnerDurabilityVariants() {
+    auto const freshBox = shulker("minecraft:red_shulker_box", {innerPickaxe(10)});
+    auto const wornBox  = shulker("minecraft:red_shulker_box", {innerPickaxe(1400)});
+    CHECK(!same(freshBox, wornBox));
+    CHECK(before(freshBox, wornBox));
+    // The review example: Efficiency V + nearly full vs plain + nearly broken.
+    auto const good = shulker(
+        "minecraft:red_shulker_box",
+        {
+            innerPickaxe(10, {{kEfficiency, 5}}
+             )
+    }
+    );
+    auto const bad = shulker("minecraft:red_shulker_box", {innerPickaxe(1500)});
+    CHECK(!same(good, bad));
+    CHECK(before(good, bad));
+}
+
+void testShulkerInnerVariantsIgnoreSlotArrangement() {
+    // Same three inner stacks, listed in different orders (i.e. different
+    // internal slots) and with one kind split across two stacks.
+    auto const a = shulker(
+        "minecraft:red_shulker_box",
+        {
+            innerPickaxe(0, {{kEfficiency, 5}}
+             ),
+            cobble(20),
+            stone(64),
+            cobble(12)
+    }
+    );
+    auto const b = shulker(
+        "minecraft:red_shulker_box",
+        {
+            stone(64),
+            cobble(32),
+            innerPickaxe(0, {{kEfficiency, 5}}
+             )
+    }
+    );
+    CHECK(same(a, b));
+    CHECK(a.contents == b.contents);
 }
 
 void testNamedShulkersOrderByReadableName() {
@@ -534,6 +608,10 @@ int runSortKeyTests() {
     testAllColoursStayInShulkerSection();
     testContentSignatureIgnoresSlotLayout();
     testDifferentContentsOrderDeterministically();
+    testShulkerInnerEnchantedVsPlainDiffer();
+    testShulkerInnerNamedVariants();
+    testShulkerInnerDurabilityVariants();
+    testShulkerInnerVariantsIgnoreSlotArrangement();
     testNamedShulkersOrderByReadableName();
     testHashDifferencesDoNotScrambleShulkers();
     testEmptyShulkersOrderByNameThenColour();

@@ -49,8 +49,9 @@ private:
 
     int           groupOf(ItemStack const& stack);
     sort::SortKey keyOf(int group);
+    sort::SortKey buildKey(ItemStackBase const& stack, bool describeContents);
     Placement     placementOf(ItemStackBase const& stack);
-    void          describeShulkerBox(ItemStack const& stack, sort::SortKey& key);
+    void          describeShulkerBox(ItemStackBase const& stack, sort::SortKey& key, bool describeContents);
 
     CreativeItemRegistry const*              mCreativeRegistry;
     std::vector<ItemStack>                   mRepresentatives;

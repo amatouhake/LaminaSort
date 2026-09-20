@@ -7,6 +7,7 @@
 #include "mc/world/item/Item.h"
 #include "mc/world/item/ItemInstance.h"
 #include "mc/world/item/ItemStack.h"
+#include "mc/world/item/ShulkerBoxBlockItem.h"
 #include "mc/world/item/registry/CreativeGroupInfo.h"
 #include "mc/world/item/registry/CreativeItemEntry.h"
 #include "mc/world/item/registry/CreativeItemRegistry.h"
@@ -24,8 +25,9 @@ constexpr std::string_view kEnchantsKey     = "ench"; // ItemStackBase::TAG_ENCH
 constexpr std::string_view kEnchantIdKey    = "id";
 constexpr std::string_view kEnchantLevelKey = "lvl";
 constexpr std::string_view kItemsKey        = "Items"; // container item contents
-// minecraft:<colour>_shulker_box, minecraft:undyed_shulker_box
-constexpr std::string_view kShulkerBoxSuffix = "shulker_box";
+// Generic identifier used as the Shulker Box key's `typeName`; the real
+// identifier (colour) goes to `tail`.
+constexpr std::string_view kShulkerBoxKind = "shulker_box";
 
 // Maps the game's Creative categories onto LaminaSort's sections. Only these
 // four are visible tabs; anything else is treated as unknown.
@@ -44,7 +46,15 @@ sort::Section sectionOf(SharedTypes::CreativeItemCategory category) {
     }
 }
 
-bool isShulkerBox(ItemStackBase const& stack) { return stack.getTypeName().ends_with(kShulkerBoxSuffix); }
+// A vanilla Shulker Box is an instance of the game's ShulkerBoxBlockItem
+// class, whatever its colour. Comparing the item's vtable with the class's
+// exported vtable is exact and cheap; an add-on item that merely names itself
+// "*_shulker_box" is a different (data-driven) class and does not match.
+bool isShulkerBox(ItemStackBase const& stack) {
+    auto const item = stack.mItem;
+    if (!item) return false;
+    return *reinterpret_cast<void** const*>(item.get()) == ShulkerBoxBlockItem::$vftable();
+}
 
 // The game's own food flag (Item::isFood). Bedrock's Creative screen files
 // most food under Equipment (and some under Nature); a chest reads better
@@ -128,7 +138,12 @@ int StackClassifier::groupOf(ItemStack const& stack) {
 
 sort::SortKey StackClassifier::keyOf(int group) {
     if (auto it = mKeyCache.find(group); it != mKeyCache.end()) return it->second;
-    auto const&   stack = mRepresentatives[static_cast<size_t>(group)];
+    auto const key = buildKey(mRepresentatives[static_cast<size_t>(group)], true);
+    mKeyCache.emplace(group, key);
+    return key;
+}
+
+sort::SortKey StackClassifier::buildKey(ItemStackBase const& stack, bool describeContents) {
     sort::SortKey key;
 
     auto const placement = placementOf(stack);
@@ -149,7 +164,7 @@ sort::SortKey StackClassifier::keyOf(int group) {
     key.damage       = stack.getDamageValue();
 
     if (isShulkerBox(stack)) {
-        describeShulkerBox(stack, key);
+        describeShulkerBox(stack, key, describeContents);
     }
 
     // Everything else that keeps stacks apart (lore, other components, the
@@ -161,24 +176,29 @@ sort::SortKey StackClassifier::keyOf(int group) {
     if (stack.mCanPlaceOnHash != 0 || stack.mCanDestroyHash != 0) {
         key.detail += "|p" + std::to_string(stack.mCanPlaceOnHash) + "|d" + std::to_string(stack.mCanDestroyHash);
     }
-    mKeyCache.emplace(group, key);
     return key;
 }
 
 // Shulker Boxes form the leading section: filled boxes before empty ones,
 // then custom name, then a signature of the contents (independent of the
 // internal slot layout), then colour. The contents are read-only input.
-void StackClassifier::describeShulkerBox(ItemStack const& stack, sort::SortKey& key) {
+//
+// Inner items get the same key an inventory item would get, so a box with
+// an enchanted, named or worn tool differs from one with a plain tool. The
+// description is bounded to one level: vanilla never nests container items,
+// so an inner item's own contents are not expanded.
+void StackClassifier::describeShulkerBox(ItemStackBase const& stack, sort::SortKey& key, bool describeContents) {
     key.section     = sort::Section::ShulkerBox;
     key.tail        = key.typeName; // colour / variant decides late
-    key.typeName    = std::string(kShulkerBoxSuffix);
+    key.typeName    = std::string(kShulkerBoxKind);
     key.aux         = 0;
     key.variantRank = 0;
     key.enchantments.clear();
     key.damage = 0;
 
     std::vector<sort::ContentEntry> entries;
-    if (auto const* items = findList(stack.mUserData.get(), kItemsKey)) {
+    auto const*                     items = describeContents ? findList(stack.mUserData.get(), kItemsKey) : nullptr;
+    if (items) {
         for (auto const& entryPtr : *items) {
             if (!entryPtr || entryPtr->getId() != Tag::Type::Compound) continue;
             // fromTag resolves the item through the client's registry; a
@@ -186,16 +206,11 @@ void StackClassifier::describeShulkerBox(ItemStack const& stack, sort::SortKey& 
             try {
                 ItemStack inner = ItemStack::fromTag(entryPtr->as<CompoundTag>());
                 if (inner.isNull() || inner.mCount <= 0) continue;
-                auto const p = placementOf(inner);
-                entries.push_back(sort::ContentEntry{
-                    p.section,
-                    p.creativeIndex,
-                    inner.getTypeName(),
-                    static_cast<int>(inner.getAuxValue()),
-                    static_cast<int>(inner.mCount)
-                });
+                entries.push_back(sort::ContentEntry{buildKey(inner, false), static_cast<int>(inner.mCount)});
             } catch (...) {
-                entries.push_back(sort::ContentEntry{sort::Section::Unknown, INT_MAX, "?", 0, 1});
+                sort::SortKey unknown;
+                unknown.typeName = "?";
+                entries.push_back(sort::ContentEntry{unknown, 1});
             }
         }
     }
