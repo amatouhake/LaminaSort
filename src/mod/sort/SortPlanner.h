@@ -26,8 +26,13 @@ struct SlotStack {
     int group{-1};
     /// Ordering key; all stacks in a group must carry an equal key.
     SortKey key;
+    /// The slot may not be touched at all (vanilla "lock in slot"): its
+    /// contents stay where they are, nothing is merged into or out of it,
+    /// and the rest of the region is sorted around it. Ignored when empty.
+    bool locked{false};
 
     [[nodiscard]] bool empty() const { return count <= 0; }
+    [[nodiscard]] bool fixed() const { return locked && !empty(); }
 
     static SlotStack emptySlot() { return SlotStack{}; }
 };
@@ -63,8 +68,10 @@ struct Plan {
 
 /// Computes the operations that consolidate compatible partial stacks and
 /// arrange the region in sorted order (key ascending, then group, then count
-/// descending, empty slots last). The result is deterministic for a given input and the
-/// total item count of every group is preserved.
+/// descending, empty slots last). Fixed (locked, non-empty) slots are left
+/// exactly as they are and never addressed by any operation; the movable
+/// slots are sorted around them. The result is deterministic for a given
+/// input and the total item count of every group is preserved.
 [[nodiscard]] Plan planSort(std::vector<SlotStack> const& slots);
 
 /// Formats an operation for logs, e.g. "move 22 #7 -> #3" or "swap #1 <-> #9".

@@ -6,6 +6,8 @@
 #include "mc/deps/shared_types/item/CreativeItemCategory.h"
 #include "mc/world/item/Item.h"
 #include "mc/world/item/ItemInstance.h"
+#include "mc/world/item/ItemLockHelper.h"
+#include "mc/world/item/ItemLockMode.h"
 #include "mc/world/item/ItemStack.h"
 #include "mc/world/item/ShulkerBoxBlockItem.h"
 #include "mc/world/item/registry/CreativeGroupInfo.h"
@@ -56,6 +58,21 @@ bool isShulkerBox(ItemStackBase const& stack) {
     return *reinterpret_cast<void** const*>(item.get()) == ShulkerBoxBlockItem::$vftable();
 }
 
+// Vanilla item lock: LockInSlot pins the item to its slot. LockInInventory
+// only forbids taking the item out of the player's inventory, so it may still
+// be moved between inventory slots; inside a container region such an item
+// is left alone as well, since vanilla never lets a player put it there.
+bool isFixedInPlace(ItemStackBase const& stack, bool inventoryLockMovable) {
+    switch (ItemLockHelper::getItemLockMode(stack)) {
+    case ItemLockMode::LockInSlot:
+        return true;
+    case ItemLockMode::LockInInventory:
+        return !inventoryLockMovable;
+    default:
+        return false;
+    }
+}
+
 // The game's own food flag (Item::isFood). Bedrock's Creative screen files
 // most food under Equipment (and some under Nature); a chest reads better
 // with food among the items, so this is the one category override.
@@ -95,7 +112,7 @@ std::vector<sort::Enchantment> readEnchantments(ItemStackBase const& stack) {
 
 } // namespace
 
-std::vector<sort::SlotStack> StackClassifier::classify(std::vector<ItemStack> const& slots) {
+std::vector<sort::SlotStack> StackClassifier::classify(std::vector<ItemStack> const& slots, bool inventoryLockMovable) {
     mRepresentatives.clear();
     mKeyCache.clear();
     mUsedCreativeOrder = mCreativeRegistry != nullptr;
@@ -115,7 +132,8 @@ std::vector<sort::SlotStack> StackClassifier::classify(std::vector<ItemStack> co
         // item; keying off the group's representative guarantees they share
         // one key even if their user data is encoded slightly differently
         // (e.g. an empty compound versus none).
-        s.key = keyOf(s.group);
+        s.key    = keyOf(s.group);
+        s.locked = isFixedInPlace(stack, inventoryLockMovable);
         result.push_back(std::move(s));
     }
     return result;

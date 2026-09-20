@@ -77,9 +77,11 @@ std::map<int, int> totalsByGroup(std::vector<SlotStack> const& slots) {
     return totals;
 }
 
+// Fixed slots are not part of the sorted sequence: they are skipped here.
 bool emptiesLast(std::vector<SlotStack> const& slots) {
     bool seenEmpty = false;
     for (auto const& s : slots) {
+        if (s.fixed()) continue;
         if (s.empty()) seenEmpty = true;
         else if (seenEmpty) return false;
     }
@@ -87,13 +89,17 @@ bool emptiesLast(std::vector<SlotStack> const& slots) {
 }
 
 bool sorted(std::vector<SlotStack> const& slots) {
-    for (size_t i = 1; i < slots.size(); ++i) {
-        auto const& a = slots[i - 1];
-        auto const& b = slots[i];
-        if (a.empty() || b.empty()) continue;
-        if (b.key < a.key) return false;
-        if (a.key == b.key && b.group < a.group) return false;
-        if (a.key == b.key && a.group == b.group && b.count > a.count) return false;
+    SlotStack const* prev = nullptr;
+    for (auto const& s : slots) {
+        if (s.fixed() || s.empty()) continue;
+        if (prev) {
+            auto const& a = *prev;
+            auto const& b = s;
+            if (b.key < a.key) return false;
+            if (a.key == b.key && b.group < a.group) return false;
+            if (a.key == b.key && a.group == b.group && b.count > a.count) return false;
+        }
+        prev = &s;
     }
     return true;
 }
@@ -107,6 +113,17 @@ std::vector<int> counts(std::vector<SlotStack> const& slots, size_t n) {
 // Common invariants every plan must satisfy.
 void checkInvariants(std::vector<SlotStack> const& input, Plan const& plan, int line) {
     check(replays(input, plan), "plan replays onto expected state", line);
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (!input[i].fixed()) continue;
+        check(sameStack(plan.expected[i], input[i]), "fixed slot keeps its contents", line);
+        for (auto const& op : plan.ops) {
+            check(
+                op.from != static_cast<int>(i) && op.to != static_cast<int>(i),
+                "no operation touches a fixed slot",
+                line
+            );
+        }
+    }
     check(totalsByGroup(input) == totalsByGroup(plan.expected), "item totals preserved per group", line);
     check(emptiesLast(plan.expected), "empty slots are last", line);
     check(sorted(plan.expected), "expected layout is sorted", line);
@@ -362,6 +379,70 @@ void testCreativeIndexOrdersBeforeName() {
     checkInvariants(input, plan, __LINE__);
 }
 
+SlotStack lockedStack(SlotStack s) {
+    s.locked = true;
+    return s;
+}
+
+void testLockedSlotStaysAndOthersSortAround() {
+    // Slot 1 holds a locked oak-log-like stack; everything else must sort
+    // into the remaining slots without ever touching slot 1.
+    auto const input = region({egg(3), lockedStack(dirt(5)), cobble(42), empty(), cobble(10), sword(7)});
+    auto const plan  = planSort(input);
+    checkInvariants(input, plan, __LINE__);
+    CHECK(plan.expected[1].count == 5 && plan.expected[1].key.typeName == "minecraft:dirt" && plan.expected[1].fixed());
+    // Movable slots in order: 0, 2, 3, 4, 5 -> cobble 52, egg 3, sword, empty...
+    CHECK(plan.expected[0].key.typeName == "minecraft:cobblestone" && plan.expected[0].count == 52);
+    CHECK(plan.expected[2].key.typeName == "minecraft:diamond_sword");
+    CHECK(plan.expected[3].key.typeName == "minecraft:egg");
+    CHECK(plan.expected[4].empty());
+}
+
+void testLockedSlotIsNeverMergedIntoOrOutOf() {
+    // A locked partial stack of the same kind as movable partials must keep
+    // its exact count: no consolidation may use it as donor or receiver.
+    auto const input = region({cobble(42), lockedStack(cobble(10)), cobble(30)});
+    auto const plan  = planSort(input);
+    checkInvariants(input, plan, __LINE__);
+    CHECK(plan.expected[1].count == 10 && plan.expected[1].fixed());
+    // The two movable stacks still consolidate: 42 + 30 -> 64 + 8.
+    CHECK(plan.expected[0].count == 64 && plan.expected[2].count == 8);
+}
+
+void testLockedSlotsIdempotent() {
+    auto const input = region({dirt(3), lockedStack(sword(9)), cobble(42), egg(4), lockedStack(cobble(7)), cobble(30)});
+    auto const first = planSort(input);
+    checkInvariants(input, first, __LINE__);
+    auto const second = planSort(first.expected);
+    CHECK(second.ops.empty());
+    for (size_t i = 0; i < first.expected.size(); ++i) CHECK(sameStack(first.expected[i], second.expected[i]));
+}
+
+void testAllSlotsLockedIsNoOp() {
+    auto const input = region({lockedStack(dirt(3)), lockedStack(cobble(1))}, 2);
+    auto const plan  = planSort(input);
+    CHECK(plan.ops.empty());
+    checkInvariants(input, plan, __LINE__);
+}
+
+void testLockedEmptySlotIsJustEmpty() {
+    // A lock is an item property; an empty slot cannot be fixed.
+    auto slot        = SlotStack::emptySlot();
+    slot.locked      = true;
+    auto const input = region({slot, dirt(3)}, 2);
+    auto const plan  = planSort(input);
+    CHECK(plan.expected[0].key.typeName == "minecraft:dirt");
+    checkInvariants(input, plan, __LINE__);
+}
+
+void testApplyOperationRejectsFixedSlots() {
+    auto slots = region({lockedStack(cobble(42)), cobble(3), empty()}, 3);
+    CHECK(!applyOperation(slots, Operation{OpKind::Move, 1, 0, 3}));
+    CHECK(!applyOperation(slots, Operation{OpKind::Move, 0, 2, 3}));
+    CHECK(!applyOperation(slots, Operation{OpKind::Swap, 0, 1, 0}));
+    CHECK(slots[0].count == 42 && slots[1].count == 3 && slots[2].empty());
+}
+
 void testApplyOperationRejectsInvalid() {
     auto slots = region({cobble(42), dirt(3), empty()}, 3);
     CHECK(!applyOperation(slots, Operation{OpKind::Move, 0, 1, 5}));  // different groups
@@ -399,6 +480,12 @@ int main() {
     testOperationsStayInsideRegion();
     testFullRegionNoEmptySlots();
     testCreativeIndexOrdersBeforeName();
+    testLockedSlotStaysAndOthersSortAround();
+    testLockedSlotIsNeverMergedIntoOrOutOf();
+    testLockedSlotsIdempotent();
+    testAllSlotsLockedIsNoOp();
+    testLockedEmptySlotIsJustEmpty();
+    testApplyOperationRejectsFixedSlots();
     testApplyOperationRejectsInvalid();
 
     if (gFailures == 0) {

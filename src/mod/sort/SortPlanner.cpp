@@ -108,6 +108,7 @@ bool applyOperation(std::vector<SlotStack>& slots, Operation const& op) {
     if (op.from < 0 || op.from >= n || op.to < 0 || op.to >= n || op.from == op.to) return false;
     auto& src = slots[static_cast<size_t>(op.from)];
     auto& dst = slots[static_cast<size_t>(op.to)];
+    if (src.fixed() || dst.fixed()) return false;
 
     switch (op.kind) {
     case OpKind::Move: {
@@ -138,8 +139,31 @@ Plan planSort(std::vector<SlotStack> const& slots) {
     for (auto& s : plan.expected) {
         if (s.empty()) s = SlotStack::emptySlot();
     }
-    planConsolidation(plan.expected, plan.ops);
-    planArrangement(plan.expected, plan.ops);
+
+    // Fixed slots are cut out: the planner works on the movable slots as if
+    // they were a contiguous region and the operations are mapped back, so
+    // no step can ever address a fixed slot.
+    std::vector<int> movable;
+    for (int i = 0; i < static_cast<int>(plan.expected.size()); ++i) {
+        if (!plan.expected[static_cast<size_t>(i)].fixed()) movable.push_back(i);
+    }
+    std::vector<SlotStack> view;
+    view.reserve(movable.size());
+    for (int i : movable) view.push_back(plan.expected[static_cast<size_t>(i)]);
+
+    std::vector<Operation> ops;
+    planConsolidation(view, ops);
+    planArrangement(view, ops);
+
+    for (size_t k = 0; k < movable.size(); ++k) {
+        plan.expected[static_cast<size_t>(movable[k])] = view[k];
+    }
+    plan.ops.reserve(ops.size());
+    for (auto op : ops) {
+        op.from = movable[static_cast<size_t>(op.from)];
+        op.to   = movable[static_cast<size_t>(op.to)];
+        plan.ops.push_back(op);
+    }
     return plan;
 }
 

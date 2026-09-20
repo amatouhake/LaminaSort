@@ -58,6 +58,7 @@ std::string describeStack(sort::SlotStack const& s) {
     if (!s.key.enchantments.empty()) out += " ench" + std::to_string(s.key.enchantments.size());
     if (s.key.damage > 0) out += " dmg" + std::to_string(s.key.damage);
     out += " x" + std::to_string(s.count);
+    if (s.fixed()) out += " (locked)";
     return out;
 }
 
@@ -155,8 +156,15 @@ bool SortSession::run(
 
     // 2. Classify with vanilla's stackability, 3. plan.
     StackClassifier classifier(creativeRegistry);
-    auto const      slots = classifier.classify(snapshot);
-    auto const      plan  = sort::planSort(slots);
+    bool const      isPlayerInventory = region.collectionName == kInventoryCollection;
+    auto const      slots             = classifier.classify(snapshot, isPlayerInventory);
+    auto const      plan              = sort::planSort(slots);
+
+    int fixedSlots = 0;
+    for (auto const& s : slots) fixedSlots += s.fixed() ? 1 : 0;
+    if (fixedSlots > 0) {
+        logger.info("{} item-locked slot(s) stay in place; the rest is sorted around them", fixedSlots);
+    }
 
     int occupied = 0;
     for (auto const& s : slots) occupied += s.empty() ? 0 : 1;

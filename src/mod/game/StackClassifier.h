@@ -30,8 +30,10 @@ public:
     explicit StackClassifier(CreativeItemRegistry const* creativeRegistry) : mCreativeRegistry(creativeRegistry) {}
 
     /// Classifies `slots` (null stacks become empty slots). Every returned
-    /// group id indexes `representatives()`.
-    [[nodiscard]] std::vector<sort::SlotStack> classify(std::vector<ItemStack> const& slots);
+    /// group id indexes `representatives()`. Item-locked stacks are marked
+    /// `locked`; `inventoryLockMovable` says whether a "lock in inventory"
+    /// item may still change slots (true for the player's own inventory).
+    [[nodiscard]] std::vector<sort::SlotStack> classify(std::vector<ItemStack> const& slots, bool inventoryLockMovable);
 
     /// One stack per group, in group id order. Used to verify that a slot
     /// still holds the item kind the plan expects.
