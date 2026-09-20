@@ -144,6 +144,22 @@ There are no sorting profiles or ordering options; the default order described
 above is the only one. The file is read once at mod load; restart the game
 after editing it.
 
+## Installation
+
+Download `LaminaSort-client-windows-x64.zip` from the
+[GitHub Releases](https://github.com/amatouhake/LaminaSort/releases) page and
+copy the `LaminaSort/` directory it contains (`LaminaSort.dll` +
+`manifest.json`) into the `mods/` directory of a LeviLamina client
+installation (for a LeviLauncher instance:
+`%APPDATA%\levilauncher.exe\versions\<version>\mods\LaminaSort\`).
+
+The repository also ships a `tooth.json`, so the release can be installed as
+the LIP package `github.com/amatouhake/LaminaSort` where LIP / LeviLauncher
+package installation is available.
+
+LaminaSort is early (`0.x`) software: it is usable, but its behaviour and
+configuration may still change between releases.
+
 ## Building
 
 Requirements: [xmake](https://xmake.io), Visual Studio 2022 build tools, and a
@@ -155,9 +171,10 @@ xmake
 ```
 
 The packaged mod (`LaminaSort.dll` + `manifest.json`) is written to
-`bin/LaminaSort/`. Copy that folder into the `mods/` directory of a LeviLamina
-client installation (for a LeviLauncher instance:
-`%APPDATA%\levilauncher.exe\versions\<version>\mods\LaminaSort\`).
+`bin/LaminaSort/`; install that folder as described under
+[Installation](#installation). The `version` in the generated `manifest.json`
+is derived from the nearest `vMAJOR.MINOR.PATCH` Git tag (`0.0.0` when there
+is none).
 
 Unit tests for the game-independent planner:
 
