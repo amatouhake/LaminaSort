@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-21
+
 ### Added
 
 - Sort key (default `R`, remappable in the game's keyboard settings) that
